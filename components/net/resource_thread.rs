@@ -4,6 +4,7 @@
 
 //! A thread that takes a URL and streams back the binary data.
 use connector::{create_http_connector, create_ssl_client};
+//use connector::{create_http_connector};
 use cookie;
 use cookie_rs;
 use cookie_storage::CookieStorage;
@@ -38,6 +39,9 @@ use std::sync::mpsc::Sender;
 use std::thread;
 use storage_thread::StorageThreadFactory;
 use websocket_loader;
+use time;
+use std::time::{Instant, Duration};
+
 
 const TFD_PROVIDER: &'static TFDProvider = &TFDProvider;
 
@@ -102,8 +106,14 @@ fn create_http_states(config_dir: Option<&Path>) -> (Arc<HttpState>, Arc<HttpSta
             .expect("Need certificate file to make network requests")
             .join("certs"),
     };
-
+    println!("create ssl client from resource thread");
+    let ssl_client_now = Instant::now();
     let ssl_client = create_ssl_client(&ca_file);
+    let dur = ssl_client_now.elapsed();
+    println!("connector object time: {} s {} ns", dur.as_secs(), dur.subsec_nanos());
+    
+    println!("create http state");
+    let http_now = Instant::now();
     let http_state = HttpState {
         cookie_jar: RwLock::new(cookie_jar),
         auth_cache: RwLock::new(auth_cache),
@@ -111,10 +121,20 @@ fn create_http_states(config_dir: Option<&Path>) -> (Arc<HttpState>, Arc<HttpSta
         ssl_client: ssl_client.clone(),
         connector: create_http_connector(ssl_client),
     };
-
+    let post_http_dur = http_now.elapsed();
+    println!("Time taken to connect: {} s {} ns", post_http_dur.as_secs(), post_http_dur.subsec_nanos());
+    // what is this for?
+    
+    let private_client = Instant::now();
     let private_ssl_client = create_ssl_client(&ca_file);
-    let private_http_state = HttpState::new(private_ssl_client);
+    let dur_private_client = private_client.elapsed();
+    println!("Time taken to create private ssl client: {} s {} ns", dur_private_client.as_secs(), dur_private_client.subsec_nanos());
 
+    let private_client_http_state = Instant::now();
+    let private_http_state = HttpState::new( private_ssl_client);
+    let dur_private_http_state = private_client_http_state.elapsed();
+    println!("Time taken to connect to private ssl client: {} s {} ns", dur_private_http_state.as_secs(), dur_private_http_state.subsec_nanos());
+    
     (Arc::new(http_state), Arc::new(private_http_state))
 }
 
@@ -132,12 +152,16 @@ impl ResourceChannelManager {
 
         loop {
             for (id, data) in rx_set.select().unwrap().into_iter().map(|m| m.unwrap()) {
-                let group = if id == private_id {
+               let group = if id == private_id {
                     &private_http_state
                 } else {
                     assert_eq!(id, public_id);
                     &public_http_state
                 };
+                /*let group = {
+                    assert_eq!(id, public_id);
+                    &public_http_state
+                };*/
                 if let Ok(msg) = data.to() {
                     if !self.process_msg(msg, group) {
                         return;
@@ -346,6 +370,9 @@ impl CoreResourceManager {
                          connect: WebSocketCommunicate,
                          connect_data: WebSocketConnectData,
                          http_state: &Arc<HttpState>) {
+        let now = Instant:: now();
         websocket_loader::init(connect, connect_data, http_state.clone());
+        let dur =now.elapsed();
+        println!("WebSocket connect timing  {} ns", dur.subsec_nanos());
     }
 }

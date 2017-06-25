@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use brotli::Decompressor;
-use connector::{Connector, create_http_connector};
+use connector::{Connector, create_http_connector,ServoSslConnector,ServoSslClient};
 use cookie;
 use cookie_storage::CookieStorage;
 use devtools_traits::{ChromeToDevtoolsControlMsg, DevtoolsControlMsg, HttpRequest as DevtoolsHttpRequest};
@@ -69,12 +69,13 @@ pub struct HttpState {
     pub hsts_list: RwLock<HstsList>,
     pub cookie_jar: RwLock<CookieStorage>,
     pub auth_cache: RwLock<AuthCache>,
-    pub ssl_client: OpensslClient,
+    pub ssl_client: ServoSslClient,
     pub connector: Pool<Connector>,
 }
 
 impl HttpState {
-    pub fn new(ssl_client: OpensslClient) -> HttpState {
+    pub fn new(ssl_client: ServoSslClient) -> HttpState {
+        println!("http state");
         HttpState {
             hsts_list: RwLock::new(HstsList::new()),
             cookie_jar: RwLock::new(CookieStorage::new(150)),

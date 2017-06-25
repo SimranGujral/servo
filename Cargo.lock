@@ -1731,6 +1731,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "net"
 version = "0.0.1"
 dependencies = [
+ "antidote 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "base64 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "brotli 1.0.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "cookie 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
