@@ -1,1 +1,1 @@
-check-revoke = false
+paths= ["/Users/sgujral/Desktop/servo/hyper-openssl"]

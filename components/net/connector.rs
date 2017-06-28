@@ -1,19 +1,16 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-extern crate openssl;
-extern crate hyper;
-extern crate hyper_openssl;
-extern crate antidote;
-//use hyper::net::{HttpsConnector};
+
 use hosts::replace_host;
 use hyper::client::Pool;
 use hyper::error::{Result as HyperResult, Error as HyperError};
 use hyper::net::{NetworkConnector, HttpsStream, HttpStream, SslClient};
-use hyper_openssl::OpensslClient;
+use hyper_openssl::{OpensslClient, InnerStream};
 use hyper_openssl::SslStream;
 use openssl::ssl::{SSL_OP_NO_COMPRESSION, SSL_OP_NO_SSLV2, SSL_OP_NO_SSLV3,SSL_VERIFY_PEER};
-use openssl::ssl::{SslConnectorBuilder, SslContextBuilder, SslMethod, SslContext, Ssl, HandshakeError};
+use openssl::ssl::{self, SslConnectorBuilder, SslContextBuilder, SslMethod, SslContext, Ssl, HandshakeError};
+use openssl::{self};
 use std::io;
 use std::net::TcpStream;
 use std::path::PathBuf;
@@ -26,8 +23,11 @@ use std::io::BufReader;
 use std::sync::Arc;
 use openssl::x509::X509Ref;
 use openssl::nid;
-use self::antidote::Mutex;
+use antidote::Mutex;
 use hyper::net::NetworkStream;
+use hyper::{self};
+use hyper_openssl::{self};
+use hyper_openssl::SslStream as HyperStream;
 
 #[derive(Clone)]
 pub struct HttpsConnector {
@@ -60,7 +60,6 @@ impl NetworkConnector for HttpsConnector {
         } else {
             // Do not perform host replacement on the host that is used
             // for verifying any SSL certificate encountered.:
-            println!("cert verification");
             self.ssl.wrap_client(stream, host).map(HttpsStream::Https)
         }
     }
@@ -91,7 +90,10 @@ pub fn create_ssl_client(ca_file: &PathBuf) -> ServoSslClient {
         .expect("Need certificate file to make network requests")
         .join(certificate_file);*/
     let mut context = SslContextBuilder::new(SslMethod::tls()).unwrap();
+    let ca_file_dur = Instant::now();
     context.set_ca_file(ca_file).expect("could not set CA file");
+    let dur = ca_file_dur.elapsed();
+    println!("Time to add certs to the root: {} ns", dur.subsec_nanos());
     context.set_cipher_list(DEFAULT_CIPHERS).unwrap();
     context.set_options(SSL_OP_NO_SSLV2 | SSL_OP_NO_SSLV3 | SSL_OP_NO_COMPRESSION);
 
@@ -105,10 +107,13 @@ pub fn create_ssl_client(ca_file: &PathBuf) -> ServoSslClient {
 }
 
 pub fn create_http_connector(ssl_client: ServoSslClient) -> Pool<Connector> {
+    let connector_time = Instant::now();
     let https_connector = HttpsConnector::new(ssl_client);
+    let connector_time_dur = connector_time.elapsed();
+    println!("Time to create an https connector object: {} ns", connector_time_dur.subsec_nanos());
     Pool::with_connector(Default::default(), https_connector)
 }
-// when i create a servosslconnctor, there will be a context associated with it. when i  create a context and pass it to a connector. that context will be associated woth the conector.
+// when i create a servosslconnctor, there will be a context associated with it. when i  create a context and pass it to a connector. that context will be associated with the conector.
 #[derive(Clone)]
 pub struct ServoSslConnector{
     context: Arc<SslContext>, 
@@ -126,13 +131,11 @@ impl ServoSslConnector {
             .join("certs");
         let ca_pem = File::open(ca_file).unwrap();
         let mut ca_pem = BufReader::new(ca_pem);
-       /* let r = roots.add_pem_file(&mut ca_pem);
-        */
-        //ssl.set_verify_callback(SSL_VERIFY_PEER, move |p, x| {
-        //    rustls_verify(&domain, &roots, p, x)
-        //});
+        let verify_call_dur = Instant::now();
         ssl.set_verify_callback(SSL_VERIFY_PEER,
                 move |p, x| verify::verify_callback(&domain, p, x));
+        let dur = verify_call_dur.elapsed();
+        println!("{}", dur.subsec_nanos());
 
         match ssl.connect(stream) {
             Ok(stream) => Ok(stream),
@@ -151,13 +154,13 @@ impl SslClient for ServoSslClient {
     type Stream = hyper_openssl::SslStream<HttpStream>;
     fn wrap_client(&self, stream: HttpStream, host: &str) -> HyperResult<Self::Stream> {
         match self.connector.connect(host, stream) {
-            Ok(stream) => Ok(hyper_openssl::SslStream(Arc::new(Mutex::new(stream)))),
+            Ok(stream) => Ok(HyperStream{0: Arc::new(Mutex::new(InnerStream(stream)))}),
             Err(err) => Err(err),
         }
     }
 }
 
-//For OpenSSL verification
+ //For OpenSSL verification
 mod verify {
     use std::net::IpAddr;
     use std::str;
@@ -173,15 +176,15 @@ mod verify {
         if !preverify_ok || x509_ctx.error_depth() != 0 {
             return preverify_ok;
         }
-
-        match x509_ctx.current_cert() {
-            Some(x509) => verify_hostname(domain, &x509),
-            None => true,
+        match x509_ctx.current_cert(){ 
+                Some(x509) =>verify_hostname(domain, &x509),
+                None => true,
         }
 }
 
     fn verify_hostname(domain: &str, cert: &X509Ref) -> bool {
         match cert.subject_alt_names() {
+
             Some(names) => verify_subject_alt_names(domain, names),
             None => verify_subject_name(domain, &cert.subject_name()),
         }
@@ -243,9 +246,6 @@ mod verify {
 
         matches_wildcard(pattern, hostname, is_ip).unwrap_or_else(|| pattern == hostname)
 }
-
-    
-    
 
     fn matches_wildcard(pattern: &str, hostname: &str, is_ip: bool) -> Option<bool> {
         // IP addresses and internationalized domains can't involved in wildcards
@@ -328,8 +328,9 @@ mod verify {
             _ => false,
         }
 }
-
 }
+
+
 // The basic logic here is to prefer ciphers with ECDSA certificates, Forward
 // Secrecy, AES GCM ciphers, AES ciphers, and finally 3DES ciphers.
 // A complete discussion of the issues involved in TLS configuration can be found here:

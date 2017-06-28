@@ -110,7 +110,7 @@ fn create_http_states(config_dir: Option<&Path>) -> (Arc<HttpState>, Arc<HttpSta
     let ssl_client_now = Instant::now();
     let ssl_client = create_ssl_client(&ca_file);
     let dur = ssl_client_now.elapsed();
-    println!("connector object time: {} s {} ns", dur.as_secs(), dur.subsec_nanos());
+    println!("SSL client time : {} s {} ns", dur.as_secs(), dur.subsec_nanos());
     
     println!("create http state");
     let http_now = Instant::now();
